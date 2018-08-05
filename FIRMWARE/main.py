@@ -5,10 +5,30 @@ import ure as re
 from machine import Pin
 #import os
 
+import btree
+
+# Open DB
+try:
+    dbf = open("messages", "r+b")
+except OSError:
+    dbf = open("messages", "w+b")
+
+db = btree.open(dbf)
+key = b"0"
+if not b"key" in db:
+    db[b"key"] = b"0"
+    db.flush()
+else:
+    key = db[b"key"]
+
+for _key in db:
+    print("{0}: {1}".format(_key, db[_key]))
+
 # Resolve all DNS queries to local host
 MicroDNSSrv.Create({'*':'10.0.0.1'})
+
 # Start logging
-log=logging.getLogger("BIB")
+log = logging.getLogger("BIB")
 
 # Orange LED on Pin 10 will indicate this script is running
 p27 = Pin(27, Pin.OUT)
@@ -24,19 +44,31 @@ p33.value(0)
 
 app = picoweb.WebApp(__name__)
 
-@app.route(re.compile('.'))
+@app.route(re.compile('/'), methods=['GET', 'POST'])
 def home(req, resp):
+    global key
+    if req.method == "POST":
+        yield from req.read_form_data()
+        if req.form.get("message"):
+            print(req.form.get("message"))
+            db[key] = req.form.get("message")[0]
+            key = str(int(key) + 1)
+            db[b"key"] = key
+            db.flush()
+
     p33.value(1)
-    if req.path != "/home":
-        yield from picoweb.start_response(resp,status="302",headers={'Location':'home'})
-    yield from picoweb.start_response(resp,status="200", content_type="text/html")
-    htmlFile = open("index.html", "r")
-    for line in htmlFile:
-        yield from resp.awrite(line)
+    yield from app.sendfile(resp, "index.html")
+    yield from resp.awrite("<ol>")
+    for _key in db:
+        if _key != b"key":
+            yield from resp.awrite("<li>")
+            yield from resp.awrite(db[_key])
+            yield from resp.awrite("</li>")
+    yield from resp.awrite("</ol>")
+    yield from resp.awrite("</body></html>")
     p33.value(0)
 
 #def callback(p):
 #    print("Received an interrupt")
-
 
 app.run(debug=1, host = "10.0.0.1", port = 80)
